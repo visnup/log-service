@@ -1,0 +1,19 @@
+{
+  "name": "log-service",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/visnup/log-service.git"
+  },
+  "author": "Visnu Pitiyanuvath <visnupx@gmail.com> (http://visnup.com)",
+  "main": "index.js",
+  "directories": {
+    "lib": "."
+  },
+  "engines": {
+    "node": "*"
+  },
+  "dependencies": {
+    "irc-js": ">=0.2.16"
+  }
+}
