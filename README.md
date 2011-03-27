@@ -1,8 +1,8 @@
 **LogService** provides an offline messages system. When you leave
 or quit from a channel, LogService can keep track of messages and
-automatically send them to you when you re-join.'
+automatically send them to you when you re-join.
 
-**/msg LogService \<command\>**
+**/msg LogService &lt;command&gt;**
 
 The following commands are available:
 
