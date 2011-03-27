@@ -2,7 +2,7 @@ var util = require('util')
   , mongo = require('mongodb')
   , IRC = require('irc-js')
   , _ = require('underscore')
-  , me = 'LogService1';
+  , me = 'LogService';
 
 var irc = new IRC({ server: 'irc.freenode.net', nick: me })
   , db = new mongo.Db('log-service', new mongo.Server('127.0.0.1', 27017, {}));
