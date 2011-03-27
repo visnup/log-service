@@ -1,19 +1,43 @@
 var util = require('util')
-  , IRC = require('irc-js');
+  , mongo = require('mongodb')
+  , IRC = require('irc-js')
+  , _ = require('underscore')
+  , me = 'LogService1';
 
-var irc = new IRC({ server: 'irc.freenode.net', nick: 'LogService' })
-  , channels = {};
+var irc = new IRC({ server: 'irc.freenode.net', nick: me })
+  , db = new mongo.Db('log-service', new mongo.Server('127.0.0.1', 27017, {}));
 
-function param( data, no_pad, pad_char ) {
-  return ( no_pad ? '' : ( pad_char ? pad_char : ' ' ) ) + data.toString()
-}
-  
-irc.notice = function(receiver, msg) {
-  this.raw( 'NOTICE' + param( receiver ) + ' ' + param( msg || '', null, ':' ) );
-}
+// TODO pull request to irc-js:
+(function(irc) {
+  irc.notice = function(receiver, msg) {
+    this.raw( 'NOTICE' + param( receiver ) + ' ' + param( msg || '', null, ':' ) );
+  }
+  function param( data, no_pad, pad_char ) {
+    return ( no_pad ? '' : ( pad_char ? pad_char : ' ' ) ) + data.toString();
+  }
+})(irc);
 
 util.log('connecting');
-irc.connect();
+irc.connect(function() {
+  db.open(function(err) {
+    util.log('mongodb ready');
+
+    db.collection('nicks', function(err, collection) {
+      db.nicks = collection;
+      db.nicks.ensureIndex('channels._id', function() { });
+
+      db.nicks.distinct('channels._id', function(err, chs) {
+        for (var i = 0; i < chs.length; i++) if (chs[i]) irc.join(chs[i]);
+      });
+    });
+
+    db.createCollection('messages', { capped: true, max: 2147483647 }, function(err, collection) {
+      db.messages = collection;
+      db.messages.ensureIndex([['channel', 1], ['created_at', 1]], function() { });
+    });
+  });
+});
+
 irc.addListener('privmsg', function respond(message) {
   var from = message.person.nick;
 
@@ -25,35 +49,16 @@ irc.addListener('privmsg', function respond(message) {
     , msg = message.params[1]
     , cmd = msg.split(/\s+/);
 
-  if (to === 'LogService') {
+  if (to === me) {
     switch (cmd[0].toLowerCase()) {
       case 'watch':
-        var ch = cmd[1]
-          , channel = channels[ch] = channels[ch] || {};
-        util.log('watching [' + ch + '] ' + from);
-        channel[from] = null;
-        irc.join(ch);
+        watch(cmd[1], from);
         break;
       case 'unwatch':
-        var ch = cmd[1]
-          , channel = channels[ch] = channels[ch] || {};
-        util.log('unwatching [' + ch + '] ' + from);
-        delete channel[from];
-        if (Object.keys(channel).length === 0) {
-          util.log('unwatching [' + ch + ']');
-          delete channels[ch];
-          irc.part(ch);
-        }
+        unwatch(cmd[1], from);
         break;
       case 'status':
-        Object.keys(channels).forEach(function(ch) {
-          if (from in channels[ch]) {
-            if (channels[ch][from])
-              irc.notice(from, 'recording ' + ch);
-            else
-              irc.notice(from, 'watching ' + ch);
-          }
-        });
+        status(from);
         break;
       default:
         var help = [
@@ -75,37 +80,72 @@ irc.addListener('privmsg', function respond(message) {
           irc.notice(from, help[i]);
     }
   } else {
-    var ch = to
-      , channel = channels[ch];
-    Object.keys(channel).forEach(function(nick) {
-      var messages = channel[nick];
-      if (messages)
-        messages.push('[' + ch + '] ' + from + ': ' + msg);
+    record(to, from, msg);
+  }
+});
+
+irc.addListener('part', part);
+irc.addListener('quit', part);
+irc.addListener('join', join);
+
+function watch(ch, n) {
+  db.nicks.update({ _id: n, channels: null }, { _id: n, channels: [] },{ upsert: true }, function(err, nick) {
+    db.nicks.update({ _id: n, 'channels._id': { '$ne': ch } }, { '$push': { channels: { _id: ch } } }, function(err, nick) {
+      util.log('watch [' + ch + '] ' + n);
+      irc.join(ch);
     });
-  }
-});
+  });
+}
 
-irc.addListener('part', listen);
-irc.addListener('quit', listen);
+function unwatch(ch, n) {
+  db.nicks.update({ _id: n }, { '$pull': { channels: { _id: ch } } }, function(err) {
+    util.log('unwatch [' + ch + '] ' + n);
+    db.nicks.count({ 'channels._id': ch }, function(err, count) {
+      if (count === 0) {
+        util.log('unwatch [' + ch + ']');
+        irc.part(ch);
+      }
+    });
+  });
+}
 
-function listen(message) {
-  //console.log(message);
+function status(n) {
+  db.nicks.findOne({ _id: n }, function(err, nick) {
+    if (!nick) return;
+    nick.channels.forEach(function(channel) {
+      if (channel.part)
+        irc.notice(n, 'listening ' + channel._id);
+      else
+        irc.notice(n, 'watching ' + channel._id);
+    });
+  });
+}
 
-  var nick = message.person.nick
+function record(to, from, message) {
+  db.messages.insert({ to: to, from: from, message: message, created_at: new Date() });
+}
+
+function part(message) {
+  var n = message.person.nick
     , ch = message.params[0];
-  if (channels[ch] && nick in channels[ch])
-    channels[ch][nick] = [];
-};
+  util.log('listening [' + ch + '] ' + n);
+  db.nicks.update({ _id: n, 'channels._id': ch }, { '$set': { 'channels.$.part': new Date() } });
+}
 
-irc.addListener('join', function dump(message) {
-  //console.log(message);
+function join(message) {
+  var n = message.person.nick
+    , ch = message.params[0];
+  db.nicks.findOne({ _id: n, 'channels._id': ch, 'channels.part': { '$ne': null } }, function(err, nick) {
+    if (!nick) return;
+    var channel = _.detect(nick.channels, function(c) { return c._id === ch; });
+    db.messages.find({ to: ch, created_at: { '$gt': channel.part }}, function(err, cursor) {
+      cursor.each(function(err, message) {
+        if (!message) return;
+        var m = '[' + ch + '] ' + message.created_at.toString().replace(/ GMT.*/, '') + ' <' + message.from + '> ' + message.message;
+        irc.notice(n, m);
+      });
+    });
+  });
 
-  var nick = message.person.nick
-    , ch = message.params[0]
-    , messages;
-  if (channels[ch] && (messages = channels[ch][nick]) && messages.length) {
-    for (var i = 0; i < messages.length; i++)
-      irc.notice(nick, messages[i]);
-    channels[ch][nick] = null;
-  }
-});
+  db.nicks.update({ _id: n, 'channels._id': ch }, { '$unset': { 'channels.$.part': 1 } });
+}

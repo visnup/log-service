@@ -14,6 +14,7 @@
     "node": "*"
   },
   "dependencies": {
-    "irc-js": ">=0.2.16"
+    "irc-js": ">=0.2.16",
+    "underscore": ">=1.1.5"
   }
 }
