@@ -90,9 +90,12 @@ irc.addListener('join', join);
 
 function watch(ch, n) {
   db.nicks.update({ _id: n, channels: null }, { _id: n, channels: [] },{ upsert: true }, function(err, nick) {
-    db.nicks.update({ _id: n, 'channels._id': { '$ne': ch } }, { '$push': { channels: { _id: ch } } }, function(err, nick) {
+    db.nicks.update({ _id: n, 'channels._id': { '$ne': ch } }, {
+      '$push': { channels: { _id: ch } }
+    }, function(err, nick) {
       util.log('watch [' + ch + '] ' + n);
       irc.join(ch);
+      // TODO if user isn't in watched channel, part them immediately
     });
   });
 }
@@ -111,13 +114,16 @@ function unwatch(ch, n) {
 
 function status(n) {
   db.nicks.findOne({ _id: n }, function(err, nick) {
-    if (!nick) return;
-    nick.channels.forEach(function(channel) {
-      if (channel.part)
-        irc.notice(n, 'listening ' + channel._id);
-      else
-        irc.notice(n, 'watching ' + channel._id);
-    });
+    if (!nick || !nick.channels || nick.channels.length === 0)
+      irc.notice(n, 'Not watching any channels.');
+    else
+      nick.channels.forEach(function(channel) {
+        found = true;
+        if (channel.part)
+          irc.notice(n, 'WATCH * ' + channel._id);
+        else
+          irc.notice(n, 'WATCH   ' + channel._id);
+      });
   });
 }
 
@@ -127,9 +133,21 @@ function record(to, from, message) {
 
 function part(message) {
   var n = message.person.nick
-    , ch = message.params[0];
+    , ch = message.params[0]
+    , now = new Date();
   util.log('listening [' + ch + '] ' + n);
-  db.nicks.update({ _id: n, 'channels._id': ch }, { '$set': { 'channels.$.part': new Date() } });
+  if (ch.match(/^#/))
+    db.nicks.update({ _id: n, 'channels._id': ch }, {
+      '$set': { 'channels.$.part': now }
+    });
+  else
+    db.nicks.findOne({ _id: n }, function(err, nick) {
+      if (!nick || !nick.channels) return;
+      var channels = {};
+      for (var i = 0; i < nick.channels.length; i++)
+        channels['channels.' + i + '.part'] = now;
+      db.nicks.update({ _id: n }, { '$set': channels });
+    });
 }
 
 function join(message) {
@@ -147,5 +165,7 @@ function join(message) {
     });
   });
 
-  db.nicks.update({ _id: n, 'channels._id': ch }, { '$unset': { 'channels.$.part': 1 } });
+  db.nicks.update({ _id: n, 'channels._id': ch }, {
+    '$unset': { 'channels.$.part': 1 }
+  });
 }
