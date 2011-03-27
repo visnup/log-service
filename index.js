@@ -57,9 +57,19 @@ irc.addListener('privmsg', function respond(message) {
         break;
       default:
         var help = [
-          '/msg LogService WATCH [channel]',
-          '/msg LogService UNWATCH [channel]',
-          '/msg LogService STATUS'
+          '***** \002LogService\017 Help *****',
+          '\002LogService\017 provides an offline messages system. When you leave',
+          'or quit from a channel, LogService can keep track of messages and',
+          'automatically send them to you when you re-join.',
+          ' ',
+          '\002/msg LogService <command>\017',
+          ' ',
+          'The following commands are available:',
+          '\002WATCH [channel]\017      Starts monitoring a channel.',
+          '\002UNWATCH [channel]\017    Stops monitoring a channel.',
+          '\002STATUS\017               Lists what channels are currently being monitored.',
+          ' ',
+          '***** \002End of Help\017 ******'
         ];
         for (var i = 0; i < help.length; i++)
           irc.notice(from, help[i]);
