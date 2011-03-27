@@ -2,7 +2,7 @@
 or quit from a channel, LogService can keep track of messages and
 automatically send them to you when you re-join.'
 
-**/msg LogService <command>**
+**/msg LogService \<command\>**
 
 The following commands are available:
 
